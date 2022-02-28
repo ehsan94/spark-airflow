@@ -1,0 +1,205 @@
+version: "3.7"
+services:  
+    # postgres used by airflow
+    postgres:
+        image: postgres:9.6
+        networks:
+            - default_net
+        volumes: 
+            # Create Test database on Postgresql
+            - ./docker-airflow/pg-init-scripts:/docker-entrypoint-initdb.d
+        environment:
+            - POSTGRES_USER=airflow
+            - POSTGRES_PASSWORD=airflow
+            - POSTGRES_DB=airflow
+        ports:
+            - "5432:5432"
+
+    # airflow LocalExecutor
+    airflow-webserver:
+        image: docker-airflow-spark:1.10.7_3.1.2
+        restart: always
+        networks:
+            - default_net
+        depends_on:
+            - postgres
+        environment:
+            - LOAD_EX=n
+            - EXECUTOR=Local
+        volumes:
+            - ../dags:/usr/local/airflow/dags #DAG folder
+            - ../spark/app:/usr/local/spark/app #Spark Scripts (Must be the same path in airflow and Spark Cluster)
+            - ../spark/resources:/usr/local/spark/resources #Resources folder (Must be the same path in airflow and Spark Cluster)
+        ports:
+            - "8282:8282"
+        command: webserver
+        healthcheck:
+            test: ["CMD-SHELL", "[ -f /usr/local/airflow/airflow-webserver.pid ]"]
+            interval: 30s
+            timeout: 30s
+            retries: 3
+
+    # Spark with 3 workers
+    spark:
+        image: bitnami/spark:3.1.2
+        user: root # Run container as root container: https://docs.bitnami.com/tutorials/work-with-non-root-containers/
+        hostname: spark
+        networks:
+            - default_net
+        environment:
+            - SPARK_MODE=master
+            - SPARK_RPC_AUTHENTICATION_ENABLED=no
+            - SPARK_RPC_ENCRYPTION_ENABLED=no
+            - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+            - SPARK_SSL_ENABLED=no
+        volumes:
+            - ../spark/app:/usr/local/spark/app # Spark scripts folder (Must be the same path in airflow and Spark Cluster)
+            - ../spark/resources:/usr/local/spark/resources #Resources folder (Must be the same path in airflow and Spark Cluster)
+        ports:
+            - "8181:8080"
+            - "7077:7077"
+
+    spark-worker-1:
+        image: bitnami/spark:3.1.2
+        user: root
+        networks:
+            - default_net
+        environment:
+            - SPARK_MODE=worker
+            - SPARK_MASTER_URL=spark://spark:7077
+            - SPARK_WORKER_MEMORY=1G
+            - SPARK_WORKER_CORES=1
+            - SPARK_RPC_AUTHENTICATION_ENABLED=no
+            - SPARK_RPC_ENCRYPTION_ENABLED=no
+            - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+            - SPARK_SSL_ENABLED=no
+        volumes:
+            - ../spark/app:/usr/local/spark/app # Spark scripts folder (Must be the same path in airflow and Spark Cluster)
+            - ../spark/resources:/usr/local/spark/resources #Resources folder (Must be the same path in airflow and Spark Cluster)
+
+    spark-worker-2:
+        image: bitnami/spark:3.1.2
+        user: root
+        networks:
+            - default_net
+        environment:
+            - SPARK_MODE=worker
+            - SPARK_MASTER_URL=spark://spark:7077
+            - SPARK_WORKER_MEMORY=1G
+            - SPARK_WORKER_CORES=1
+            - SPARK_RPC_AUTHENTICATION_ENABLED=no
+            - SPARK_RPC_ENCRYPTION_ENABLED=no
+            - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+            - SPARK_SSL_ENABLED=no
+        volumes:
+            - ../spark/app:/usr/local/spark/app # Spark scripts folder (Must be the same path in airflow and Spark Cluster)
+            - ../spark/resources:/usr/local/spark/resources #Resources folder (Must be the same path in airflow and Spark Cluster)
+
+    spark-worker-3:
+        image: bitnami/spark:3.1.2
+        user: root
+        networks:
+            - default_net
+        environment:
+            - SPARK_MODE=worker
+            - SPARK_MASTER_URL=spark://spark:7077
+            - SPARK_WORKER_MEMORY=1G
+            - SPARK_WORKER_CORES=1
+            - SPARK_RPC_AUTHENTICATION_ENABLED=no
+            - SPARK_RPC_ENCRYPTION_ENABLED=no
+            - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+            - SPARK_SSL_ENABLED=no
+        volumes:
+            - ../spark/app:/usr/local/spark/app # Spark scripts folder (Must be the same path in airflow and Spark Cluster)
+            - ../spark/resources:/usr/local/spark/resources #Resources folder (Must be the same path in airflow and Spark Cluster)
+
+    #Jupyter notebook
+    jupyter-spark:
+        image: jupyter/pyspark-notebook:spark-3.1.2
+        networks:
+            - default_net
+        ports:
+          - "8888:8888"
+          - "4040-4080:4040-4080"
+        volumes:
+          - ../notebooks:/home/jovyan/work/notebooks/
+          - ../spark/resources/data:/home/jovyan/work/data/
+          - ../spark/resources/jars:/home/jovyan/work/jars/
+    
+    mongo:
+        container_name: mongo1
+        hostname: mongo1
+        image: mongo:5.0.3
+        restart: always
+        ports:
+            - "27017:27017"
+        volumes:
+            - mongo_data:/data/db
+        networks:
+            - default_net
+    mongo-express:
+        container_name: mongo-express1
+        hostname: mongo-express1
+        image: mongo-express:0.54.0
+        depends_on:
+            - mongo
+        restart: always
+        ports:
+            - 8081:8081
+        environment:
+            ME_CONFIG_MONGODB_URL: mongodb://mongo1:27017/
+        networks:
+            - default_net
+    
+    elastic:
+        container_name: elastic
+        hostname: elastic
+        tty: True
+        image: docker.elastic.co/elasticsearch/elasticsearch:7.14.2
+        restart: always
+        environment:
+            cluster.name: "es-docker"
+            discovery.type: single-node
+            node.name: "elastic"
+            ES_JAVA_OPTS: "-Xms1024m -Xmx1024m"
+        ports:
+            - "9200:9200"
+        ulimits:
+            memlock:
+                soft: -1
+                hard: -1
+        volumes:
+            - elastic_data:/usr/share/elasticsearch/data
+            - ./logs:/usr/share/elasticsearch/logs
+        networks:
+            - default_net
+
+    zookeeper:
+        container_name: zookeeper1
+        hostname: zookeeper1
+        image: wurstmeister/zookeeper
+        ports:
+            - "2181:2181"
+        networks:
+            - default_net
+
+    kafka:
+        container_name: kafka1
+        hostname: kafka1
+        image: wurstmeister/kafka:2.12-2.0.1
+        ports:
+            - "9092:9092"
+        environment:
+            DOCKER_API_VERSION: 1.22
+            KAFKA_ADVERTISED_HOST_NAME: kafka
+            KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+        networks:
+            - default_net
+        volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+    elastic_data:
+    mongo_data:
+networks:
+    default_net:
